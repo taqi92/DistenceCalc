@@ -1,7 +1,8 @@
-<FrameLayout android:layout_width="match_parent"
+<FrameLayout xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
     android:layout_height="match_parent"
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:ads="http://schemas.android.com/apk/res-auto">
+    >
 
     <fragment android:id="@+id/map"
         android:name="com.google.android.gms.maps.SupportMapFragment"
@@ -10,7 +11,8 @@
         xmlns:tools="http://schemas.android.com/tools"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        tools:context="com.androidtutorialpoint.googlemapsretrofit.MapsActivity"/>
+        tools:context="map.taqi.mapapp.MapsActivity"
+        tools:layout="@layout/activity_maps" />
 
     <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
         xmlns:tools="http://schemas.android.com/tools"
@@ -20,17 +22,23 @@
         android:paddingTop="10dp"
         android:paddingLeft="10dp">
 
+
         <Button
-            android:id="@+id/btnAtm"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Nearby ATM" />
+            android:text="Start"
+            android:id="@+id/startbtn" />
 
-
+        <Button
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Stop"
+            android:id="@+id/stopbtn"
+            />
 
         <TextView
-            android:id="@+id/tv_lat"
             android:layout_width="wrap_content"
+            android:id="@+id/tv_lat"
             android:layout_height="wrap_content" />
 
         <TextView
@@ -38,14 +46,13 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
-    </LinearLayout>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:id="@+id/measure"
+            android:hint="distence"
+            android:textColor="@color/cast_expanded_controller_progress_text_color"/>
 
-    <com.google.android.gms.ads.AdView
-        android:id="@+id/adView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        ads:adSize="BANNER"
-        ads:adUnitId="@string/banner_home_footer"
-        android:layout_gravity="bottom">
-    </com.google.android.gms.ads.AdView>
+    </LinearLayout>
 </FrameLayout>

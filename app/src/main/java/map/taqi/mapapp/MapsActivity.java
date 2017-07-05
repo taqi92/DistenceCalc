@@ -1,8 +1,14 @@
+
+
+
+
 package map.taqi.mapapp;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.location.Location;
+import android.location.LocationManager;
 import android.os.Build;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.FragmentActivity;
@@ -11,13 +17,19 @@ import android.support.v4.content.ContextCompat;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
+import io.realm.Realm;
+import io.realm.RealmConfiguration;
 import map.taqi.mapapp.POJO.Example;
+
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.PendingResult;
+import com.google.android.gms.common.api.Status;
 import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationServices;
@@ -29,11 +41,12 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.nearby.messages.Distance;
+import com.google.maps.android.ui.IconGenerator;
 
-import com.google.android.gms.ads.AdListener;
-import com.google.android.gms.ads.AdRequest;
-import com.google.android.gms.ads.AdView;
-
+import java.text.DateFormat;
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 
 import retrofit.Call;
@@ -41,6 +54,9 @@ import retrofit.Callback;
 import retrofit.GsonConverterFactory;
 import retrofit.Response;
 import retrofit.Retrofit;
+
+import static com.squareup.okhttp.internal.Internal.instance;
+import static java.lang.Double.valueOf;
 
 public class MapsActivity extends FragmentActivity implements OnMapReadyCallback,
         GoogleApiClient.ConnectionCallbacks,
@@ -50,52 +66,46 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private GoogleMap mMap;
     double latitude;
     double longitude;
-    private int PROXIMITY_RADIUS = 10000;
-    GoogleApiClient mGoogleApiClient;
+    private int PROXIMITY_RADIUS = 1000;
+    //GoogleApiClient mGoogleApiClient;
     Location mLastLocation;
     Marker mCurrLocationMarker;
+    //LocationRequest mLocationRequest;
+    private Realm myRealm;
+
+    private static MapsActivity instance;
+
+    private static ArrayList<DBObject> DBObjectArrayList = new ArrayList<>();
+
+    private static final String TAG = "LocationActivity";
+    private static final long INTERVAL = 1000 * 60 * 1; //1 minute
+    private static final long FASTEST_INTERVAL = 1000 * 60; // 1 minute
+    Button btnFusedLocation, start, stop;
+    TextView tvLocation;
     LocationRequest mLocationRequest;
+    GoogleApiClient mGoogleApiClient;
+    Location mCurrentLocation;
+    String mLastUpdateTime;
+    int distence;
+
+
+    protected void createLocationRequest() {
+        mLocationRequest = new LocationRequest();
+        mLocationRequest.setInterval(INTERVAL);
+        mLocationRequest.setFastestInterval(FASTEST_INTERVAL);
+        mLocationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+    }
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maps);
 
-
-        AdView mAdView;
-        Button btnFullscreenAd;
-
-
-        mAdView = (AdView) findViewById(R.id.adView);
-        AdRequest adRequest = new AdRequest.Builder()
-                .build();
-        mAdView.loadAd(adRequest);
-
-
-
-
-//    @Override
-//    public void onPause() {
-//        if (mAdView != null) {
-//            mAdView.pause();
-//        }
-//        super.onPause();
-//    }
-//
-//    @Override
-//    public void onResume() {
-//        super.onResume();
-//        if (mAdView != null) {
-//            mAdView.resume();
-//        }
-//    }
-//
-//    @Override
-//    public void onDestroy() {
-//        if (mAdView != null) {
-//            mAdView.destroy();
-//        }
-//        super.onDestroy();
+        RealmConfiguration config = new RealmConfiguration.Builder(this).build();
+        Realm.setDefaultConfiguration(config);
+        myRealm = Realm.getInstance(MapsActivity.this);
+        instance = this;
 
 
         if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -109,6 +119,26 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         } else {
             Log.d("onCreate", "Google Play Services available. Continuing.");
         }
+
+        createLocationRequest();
+        mGoogleApiClient = new GoogleApiClient.Builder(this)
+                .addApi(LocationServices.API)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .build();
+
+
+
+        tvLocation = (TextView) findViewById(R.id.measure);
+
+        btnFusedLocation = (Button) findViewById(R.id.startbtn);
+        btnFusedLocation.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View arg0) {
+                build_retrofit_and_get_response("Measure");
+                updateUI();
+            }
+        });
 
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
@@ -129,15 +159,117 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         return true;
     }
 
-    /**
-     * Manipulates the map once available.
-     * This callback is triggered when the map is ready to be used.
-     * This is where we can add markers or lines, add listeners or move the camera. In this case,
-     * we just add a marker near Sydney, Australia.
-     * If Google Play services is not installed on the device, the user will be prompted to install
-     * it inside the SupportMapFragment. This method will only be triggered once the user has
-     * installed Google Play services and returned to the app.
-     */
+
+    private void updateUI() {
+        Log.d(TAG, "UI update initiated .............");
+        if (null != mCurrentLocation) {
+            String lat = String.valueOf(mCurrentLocation.getLatitude());
+            String lng = String.valueOf(mCurrentLocation.getLongitude());
+            //int distence = (int) (valueOf(mCurrentLocation.getLatitude())-valueOf(mLastLocation.getLatitude()));
+            tvLocation.setText("At Time: " + mLastUpdateTime + "\n" +
+                    "Latitude: " + lat + "\n" +
+                    "Longitude: " + lng + "\n" +
+                    "Distence: " + distence + "\n" +
+                    "Accuracy: " + mCurrentLocation.getAccuracy() + "\n" +
+                    "Provider: " + mCurrentLocation.getProvider());
+        } else {
+            Log.d(TAG, "location is null ...............");
+        }
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        Log.d(TAG, "onStart fired ..............");
+        mGoogleApiClient.connect();
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        Log.d(TAG, "onStop fired ..............");
+//        mGoogleApiClient.disconnect();
+//        Log.d(TAG, "isConnected ...............: " + mGoogleApiClient.isConnected());
+    }
+
+    protected void startLocationUpdates() {
+        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+            return;
+        }
+        PendingResult<Status> pendingResult = LocationServices.FusedLocationApi.requestLocationUpdates(
+                mGoogleApiClient, mLocationRequest, this);
+        Log.d(TAG, "Location update started ..............: ");
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        stopLocationUpdates();
+    }
+
+    protected void stopLocationUpdates() {
+        LocationServices.FusedLocationApi.removeLocationUpdates(
+                mGoogleApiClient, this);
+        Log.d(TAG, "Location update stopped .......................");
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (mGoogleApiClient.isConnected()) {
+            startLocationUpdates();
+            Log.d(TAG, "Location update resumed .....................");
+        }
+    }
+
+
+    private void addMarker() {
+        MarkerOptions options = new MarkerOptions();
+
+        // following four lines requires 'Google Maps Android API Utility Library'
+        // https://developers.google.com/maps/documentation/android/utility/
+        // I have used this to display the time as title for location markers
+        // you can safely comment the following four lines but for this info
+
+        IconGenerator iconFactory = new IconGenerator(this);
+        iconFactory.setStyle(IconGenerator.STYLE_PURPLE);
+        options.icon(BitmapDescriptorFactory.fromBitmap(iconFactory.makeIcon(mLastUpdateTime)));
+        options.anchor(iconFactory.getAnchorU(), iconFactory.getAnchorV());
+
+        LatLng currentLatLng = new LatLng(mCurrentLocation.getLatitude(), mCurrentLocation.getLongitude());
+        options.position(currentLatLng);
+        Marker mapMarker = mMap.addMarker(options);
+        long atTime = mCurrentLocation.getTime();
+        mLastUpdateTime = DateFormat.getTimeInstance().format(new Date(atTime));
+        mapMarker.setTitle(mLastUpdateTime);
+        Log.d(TAG, "Marker added.............................");
+        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng,
+                13));
+        Log.d(TAG, "Zoom done.............................");
+    }
+
+
+//    private String getDistance(double lat2, double lon2){
+//        Location loc1 = new Location(mCurrentLocation);
+//        loc1.setLatitude(mCurrentLocation.getLatitude());
+//        loc1.setLongitude(mCurrentLocation.getLongitude());
+//        Location loc2 = new Location(mLastLocation);
+//        loc2.setLatitude(lat2);
+//        loc2.setLongitude(lon2);
+//        float distanceInMeters = loc1.distanceTo(loc2);
+//        float mile = distanceInMeters / 1609.34f;
+//        String sm = String.format("%.2f", mile);
+//        return sm;
+//    }
+
+
     @Override
     public void onMapReady(GoogleMap googleMap) {
         mMap = googleMap;
@@ -156,11 +288,11 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             mMap.setMyLocationEnabled(true);
         }
 
-        Button btnRestaurant = (Button) findViewById(R.id.btnAtm);
-        btnRestaurant.setOnClickListener(new View.OnClickListener() {
+        Button stop = (Button) findViewById(R.id.stopbtn);
+        stop.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                build_retrofit_and_get_response("atm");
+                onStop();
             }
         });
 
@@ -204,7 +336,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                         markerOptions.icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED));
                         // move map camera
                         mMap.moveCamera(CameraUpdateFactory.newLatLng(latLng));
-                        mMap.animateCamera(CameraUpdateFactory.zoomTo(11));
+                        mMap.animateCamera(CameraUpdateFactory.zoomTo(15));
                     }
                 } catch (Exception e) {
                     Log.d("onResponse", "There is an error");
@@ -277,6 +409,10 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         Log.d("onLocationChanged", String.format("latitude:%.3f longitude:%.3f", latitude, longitude));
 
         Log.d("onLocationChanged", "Exit");
+
+        mCurrentLocation = location;
+        mLastUpdateTime = DateFormat.getTimeInstance().format(new Date());
+        addMarker();
     }
 
     @Override
